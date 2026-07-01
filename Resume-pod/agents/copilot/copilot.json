@@ -1,0 +1,8 @@
+{
+  "name": "copilot",
+  "description": "AI Job Assistant that parses job descriptions, suggests resume edits, drafts messages, and creates prep sheets.",
+  "instruction": { "$file": "instruction.md" },
+  "toolsets": ["POD"],
+  "visibility": "POD",
+  "permissions": { "grants": [] }
+}

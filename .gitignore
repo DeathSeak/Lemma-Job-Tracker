@@ -1,0 +1,18 @@
+# Rust build artifacts
+/target
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Telemetry and process logs
+*.log

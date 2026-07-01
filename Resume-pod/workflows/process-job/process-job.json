@@ -1,0 +1,56 @@
+{
+  "name": "process-job",
+  "description": "Orchestrates job parsing, resume gap analysis, outreach drafting, and application recording.",
+  "start": { "type": "MANUAL" },
+  "nodes": [
+    { "id": "intake", "type": "FORM", "label": "Intake Form",
+      "config": { "input_schema": {
+        "type": "object",
+        "properties": {
+          "company": { "type": "string" },
+          "role": { "type": "string" },
+          "job_url": { "type": "string" },
+          "job_context": { "type": "string" },
+          "resume_context": { "type": "string" }
+        },
+        "required": ["company", "role", "job_context", "resume_context"]
+      } } },
+    { "id": "copilot_node", "type": "AGENT", "label": "AI Analysis",
+      "config": {
+        "agent_name": "copilot",
+        "input_mapping": {
+          "company": { "type": "expression", "value": "intake.company" },
+          "role": { "type": "expression", "value": "intake.role" },
+          "job_url": { "type": "expression", "value": "intake.job_url" },
+          "job_context": { "type": "expression", "value": "intake.job_context" },
+          "resume_context": { "type": "expression", "value": "intake.resume_context" }
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "resume": { "type": "string" },
+            "outreach": { "type": "string" },
+            "notes": { "type": "string" }
+          },
+          "required": ["resume", "outreach", "notes"]
+        }
+      } },
+    { "id": "save-node", "type": "FUNCTION", "label": "Save Application",
+      "config": {
+        "function_name": "save_application",
+        "input_mapping": {
+          "company": { "type": "expression", "value": "intake.company" },
+          "role": { "type": "expression", "value": "intake.role" },
+          "job_url": { "type": "expression", "value": "intake.job_url" },
+          "agent_output": { "type": "expression", "value": "copilot_node.answer" }
+        }
+      } },
+    { "id": "end", "type": "END", "label": "Done" }
+  ],
+  "edges": [
+    { "id": "e1", "source": "intake", "target": "copilot_node" },
+    { "id": "e2", "source": "copilot_node", "target": "save-node" },
+    { "id": "e3", "source": "save-node", "target": "end" }
+  ],
+  "visibility": "POD"
+}

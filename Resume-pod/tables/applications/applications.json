@@ -1,0 +1,17 @@
+{
+  "name": "applications",
+  "primary_key_column": "id",
+  "enable_rls": false,
+  "visibility": "POD",
+  "columns": [
+    { "name": "company", "type": "TEXT", "required": true, "max_length": 240 },
+    { "name": "role", "type": "TEXT", "required": true, "max_length": 240 },
+    { "name": "status", "type": "ENUM", "required": true, "default": "scouted",
+      "options": ["scouted", "applied", "interviewing", "offered", "rejected"] },
+    { "name": "job_url", "type": "TEXT", "required": false, "max_length": 1000 },
+    { "name": "resume_changes", "type": "TEXT", "required": false },
+    { "name": "outreach_draft", "type": "TEXT", "required": false },
+    { "name": "interview_notes", "type": "TEXT", "required": false }
+  ],
+  "config": {}
+}

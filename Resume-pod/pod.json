@@ -1,0 +1,5 @@
+{
+  "format_version": 2,
+  "name": "Resume-pod",
+  "description": "Lemma Job Tracker workspace pod containing database schemas, AI workflows, and python helper functions."
+}

@@ -1,0 +1,11 @@
+{
+  "name": "save_application",
+  "description": "Parses agent output and writes to the applications table",
+  "type": "API",
+  "visibility": "POD",
+  "code": { "$file": "code.py" },
+  "permissions": { "grants": [
+    { "resource_type": "datastore_table", "resource_name": "applications",
+      "permission_ids": ["datastore.table.read", "datastore.record.write"] }
+  ] }
+}

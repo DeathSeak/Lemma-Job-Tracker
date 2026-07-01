@@ -1,0 +1,38 @@
+[package]
+name = "lemma-job-tracker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Debmalya Pyne"]
+description = "Secure E2EE ingestion backend bridging to a local lemma-platform SDK pod"
+
+[dependencies]
+# --- Async runtime + web framework ---
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+
+# --- HTTP client + web scraping ---
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+scraper = "0.19"
+
+# --- PDF extraction ---
+pdf-extract = "0.7"
+
+# --- Cryptography (E2EE payload handling) ---
+aes-gcm = "0.10"
+rand = "0.8"
+
+# --- Serialization ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- Error handling + logging ---
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower-http = { version = "0.5", features = ["cors"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
