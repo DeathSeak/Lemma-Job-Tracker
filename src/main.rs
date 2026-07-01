@@ -1,12 +1,4 @@
-//! AI Job Application Command Centre — axum server + Lemma SDK bridge.
-//!
-//! Zero-metadata data flow (per request to `/api/process_job`):
-//!   1. Ingest job URL + PDF resume concurrently — raw text lives only in RAM.
-//!   2. Pass each blob through `crypto::encrypt_payload` (AES-256-GCM) to prove
-//!      the E2EE boundary. The ciphertext is transient and never persisted.
-//!   3. Decrypt back to raw context (hackathon only — production would keep the
-//!      payload encrypted end-to-end or hand the key to the Lemma pod).
-//!   4. Trigger a workflow run on the cloud Lemma pod and submit the intake form.
+// Lemma Job Tracker - Axum server and Lemma SDK bridge.
 
 mod crypto;
 mod ingest;
@@ -24,14 +16,10 @@ use thiserror::Error;
 use tracing::{error, info};
 use tower_http::cors::{Any, CorsLayer};
 
-/// Default active Lemma API base URL.
+// Default target URL of Lemma Cloud.
 const DEFAULT_LEMMA_BASE_URL: &str = "https://api.lemma.work";
 
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-/// Inbound request from the frontend dashboard.
+// Inbound application request payload.
 #[derive(Debug, Deserialize)]
 struct JobRequest {
     job_url: String,
@@ -41,40 +29,32 @@ struct JobRequest {
     role: String,
 }
 
-/// Form submission schema for the workflow intake form node.
+// Intake form submission payload for workflow run.
 #[derive(Debug, Serialize)]
 struct FormSubmitPayload {
     node_id: String,
     inputs: serde_json::Value,
 }
 
-/// Payload to patch application records.
+// Application status update payload.
 #[derive(Debug, Deserialize)]
 struct UpdateApplicationPayload {
     status: String,
 }
 
-// ---------------------------------------------------------------------------
-// App state
-// ---------------------------------------------------------------------------
-
-/// Shared, cheaply-clonable state handed to every handler.
+// Shared application environment variables.
 #[derive(Clone)]
 struct AppState {
     http: reqwest::Client,
-    /// Dummy 32-byte AES-256 key for the hackathon prototype.
     e2ee_key: [u8; 32],
     lemma_base_url: String,
     lemma_token: String,
     lemma_pod_id: String,
 }
 
-// ---------------------------------------------------------------------------
-// Error type -> HTTP response
-// ---------------------------------------------------------------------------
-
+// Custom error handling types.
 #[derive(Debug, Error)]
-enum ApiError {
+pub enum ApiError {
     #[error("ingestion failure: {0}")]
     Ingestion(String),
     #[error("lemma bridge failure: {0}")]
@@ -84,6 +64,7 @@ enum ApiError {
 }
 
 impl ApiError {
+    // Map custom errors to standard HTTP status codes.
     fn status(&self) -> axum::http::StatusCode {
         match self {
             ApiError::Ingestion(_) => axum::http::StatusCode::BAD_GATEWAY,
@@ -94,17 +75,14 @@ impl ApiError {
 }
 
 impl IntoResponse for ApiError {
+    // Convert custom errors into standard JSON API responses.
     fn into_response(self) -> Response {
         let code = self.status();
         (code, Json(serde_json::json!({ "error": self.to_string() }))).into_response()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Config Loader Helper
-// ---------------------------------------------------------------------------
-
-/// Read the dynamically configured CLI settings from `~/.lemma/config.json`.
+// Load token and pod settings dynamically from the local CLI config.
 fn load_lemma_config() -> anyhow::Result<(String, String)> {
     let user_profile = std::env::var("USERPROFILE")
         .map_err(|_| anyhow::anyhow!("USERPROFILE environment variable not found"))?;
@@ -143,18 +121,12 @@ fn load_lemma_config() -> anyhow::Result<(String, String)> {
     Ok((token, pod_id))
 }
 
-// ---------------------------------------------------------------------------
-// Handlers
-// ---------------------------------------------------------------------------
-
-/// `GET /health` — liveness probe (Mocked for Hackathon Demo).
+// Mock mock job qualifications for backend liveness probe.
 async fn health() -> &'static str {
     "Job Title: Software Engineering Intern, Bachelors, Summer 2025\nCompany: Google\nLocation: Mountain View, CA\n\nQualifications:\n- Currently pursuing a Bachelor's degree in Computer Science or related technical field.\n- Experience programming in Java, C++, Python, or JavaScript.\n\nResponsibilities:\n- Create and support a productive and innovative team.\n- Apply algorithms and data structures to solve real-world problems.\n- Work closely with other engineers to build Google-scale applications."
 }
 
-/// `GET /api/applications`
-///
-/// Fetches the records from the `applications` table in the Lemma pod.
+// Retrieve application logs and records from the Lemma pod table.
 async fn get_applications(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -185,9 +157,7 @@ async fn get_applications(
     Ok(Json(records_json))
 }
 
-/// `PATCH /api/applications/:id`
-///
-/// Proxy status changes back to the Lemma table record.
+// Update the application status column in the Lemma pod table.
 async fn update_application(
     State(state): State<Arc<AppState>>,
     Path(record_id): Path<String>,
@@ -227,9 +197,7 @@ async fn update_application(
     Ok(Json(updated_json))
 }
 
-/// `DELETE /api/applications/:id`
-///
-/// Proxy record deletion back to the Lemma table record.
+// Delete an application record from the Lemma pod table.
 async fn delete_application(
     State(state): State<Arc<AppState>>,
     Path(record_id): Path<String>,
@@ -256,12 +224,7 @@ async fn delete_application(
     Ok(Json(serde_json::json!({ "status": "deleted" })))
 }
 
-/// `POST /api/process_job`
-///
-/// Orchestrates the full zero-metadata pipeline:
-///   - Fetches and parses job description URL + PDF resume.
-///   - AES-GCM Encrypt/Decrypt Telemetry.
-///   - Triggers the workflow run on Lemma Cloud and submits the parsed details to the intake form.
+// Ingest job/resume context, encrypt/decrypt E2EE telemetry, and trigger the workflow run.
 async fn process_job(
     State(state): State<Arc<AppState>>,
     Json(req): Json<JobRequest>,
@@ -270,11 +233,10 @@ async fn process_job(
 
     info!(%job_url, %resume_path, %company, %role, "processing job request");
 
-    // --- 1) Concurrent ingestion (RAM-only) --------------------------------
+    // Fetch details and parse local resume file concurrently.
     let (fetched_job_text, resume_text) = tokio::try_join!(
         async {
             if let Some(text) = job_text {
-                // Collapse runs of whitespace so the Lemma context stays compact, matching ingestion logic
                 let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
                 Ok(compact)
             } else {
@@ -291,12 +253,11 @@ async fn process_job(
         }
     )?;
 
-    // We keep the variable name job_text for the rest of the handler
     let job_text = fetched_job_text;
 
     info!(job_text_len = job_text.len(), resume_text_len = resume_text.len(), "[STEP 1/4] Ingestion complete");
 
-    // --- 2) E2EE proof: wrap both plaintext blobs with AES-256-GCM ---------
+    // Perform AES-GCM encryption on the ingested text blobs for telemetry.
     let job_ct = crypto::encrypt_payload(job_text.as_bytes(), &state.e2ee_key)
         .map_err(|e| ApiError::Internal(format!("job encrypt: {e}")))?;
     let resume_ct = crypto::encrypt_payload(resume_text.as_bytes(), &state.e2ee_key)
@@ -304,7 +265,7 @@ async fn process_job(
 
     info!(job_ct_len = job_ct.len(), resume_ct_len = resume_ct.len(), "[STEP 2/4] Encryption complete");
 
-    // --- 3) Decrypt back to raw context ------------------------------------
+    // Decrypt E2EE payloads to retrieve clean strings.
     let job_plain = crypto::decrypt_payload(&job_ct, &state.e2ee_key)
         .map_err(|e| ApiError::Internal(format!("job decrypt: {e}")))?;
     let resume_plain = crypto::decrypt_payload(&resume_ct, &state.e2ee_key)
@@ -315,14 +276,13 @@ async fn process_job(
 
     info!("[STEP 3/4] Decryption complete, sending to Lemma Cloud...");
 
-    // --- 4) Bridge to the cloud Lemma workflow trigger --------------------
-    
-    // Step A: Create the workflow run
+    // Setup target cloud workflow run endpoint.
     let create_run_url = format!(
         "{}/pods/{}/workflows/process-job/runs",
         state.lemma_base_url, state.lemma_pod_id
     );
 
+    // Call POST method to start the workflow run.
     let create_resp = state
         .http
         .post(&create_run_url)
@@ -349,12 +309,13 @@ async fn process_job(
 
     info!(%run_id, "[STEP 4/4] Workflow run created, submitting intake form...");
 
-    // Step B: Submit the intake form values to start execution
+    // Setup cloud workflow intake form endpoint.
     let submit_form_url = format!(
         "{}/pods/{}/workflow-runs/{}/form",
         state.lemma_base_url, state.lemma_pod_id, run_id
     );
 
+    // Prepare inputs matching the intake form nodes.
     let submit_payload = FormSubmitPayload {
         node_id: "intake".to_string(),
         inputs: serde_json::json!({
@@ -366,6 +327,7 @@ async fn process_job(
         }),
     };
 
+    // Submit payload to trigger agent execution.
     let submit_resp = state
         .http
         .post(&submit_form_url)
@@ -387,7 +349,6 @@ async fn process_job(
         .await
         .map_err(|e| ApiError::Lemma(format!("parse submit form response: {e}")))?;
 
-    // Echo a receipt that includes E2EE telemetry and run details
     Ok(Json(serde_json::json!({
         "status": "ok",
         "e2ee": {
@@ -399,13 +360,9 @@ async fn process_job(
     })))
 }
 
-// ---------------------------------------------------------------------------
-// Bootstrap
-// ---------------------------------------------------------------------------
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Structured logging; default to `info`, allow override via RUST_LOG.
+    // Configure default log outputs.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -413,7 +370,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    // Dynamically load auth details and pod ID from local CLI configuration.
+    // Pull credentials dynamically from active CLI session files.
     let (lemma_token, lemma_pod_id) = match load_lemma_config() {
         Ok((token, pod_id)) => {
             info!(%pod_id, "successfully loaded Lemma CLI configurations");
@@ -425,7 +382,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Dummy all-zero AES-256 key — obviously NOT for production.
     let e2ee_key = [0u8; 32];
 
     let http = reqwest::Client::builder()
@@ -443,7 +399,7 @@ async fn main() -> anyhow::Result<()> {
         lemma_pod_id,
     });
 
-    // Configure CORS so our React dashboard can call the APIs locally
+    // Allow CORS parameters to link Axios calls directly from React dashboard.
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -458,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    info!(%addr, "AI Job Application Command Centre listening");
+    info!(%addr, "Lemma Job Tracker listening");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from typing import Optional, Any
 import re
 from lemma_sdk import FunctionContext, Pod
-
 import json
 
 class SaveAppInput(BaseModel):
@@ -21,20 +20,17 @@ class SaveAppResult(BaseModel):
 async def save_application(ctx: FunctionContext, data: SaveAppInput) -> SaveAppResult:
     pod = Pod.from_env()
     
-    # Parse the agent_output if it's a string, otherwise use it directly
+    # Process text output if raw string, otherwise bind direct dictionary structures.
     parsed = {}
     if isinstance(data.agent_output, str):
-        # Print the raw string to the Lemma logs for debugging
-        print(f"RAW AGENT OUTPUT: {data.agent_output}")
-        
         text = data.agent_output
         
-        # Try to find a JSON code block
+        # Extract structured content using standard JSON backticks.
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
         if match:
             cleaned = match.group(1)
         else:
-            # Fallback: find the first { and last }
+            # Fall back to matching opening and closing curly brackets.
             start = text.find('{')
             end = text.rfind('}')
             if start != -1 and end != -1 and end > start:
@@ -45,9 +41,7 @@ async def save_application(ctx: FunctionContext, data: SaveAppInput) -> SaveAppR
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError as e:
-            print(f"JSON Decode Error: {e}")
-            
-            # Try to salvage a numbered list format if the AI went rogue
+            # Attempt to split output by standard numbered section headers.
             r_idx = text.lower().find("1. resume")
             o_idx = text.lower().find("2. outreach")
             n_idx = text.lower().find("3. notes")
@@ -68,8 +62,7 @@ async def save_application(ctx: FunctionContext, data: SaveAppInput) -> SaveAppR
                     "notes": notes_part.strip()
                 }
             else:
-                # If the AI failed to generate valid JSON (or hit a token limit), 
-                # dump the raw output into the resume field so it's not lost!
+                # Capture all raw text into the resume field as a generic recovery.
                 parsed = {
                     "resume": f"**Warning: AI output was not valid JSON. Showing raw output below:**\n\n{text}", 
                     "outreach": "Error: See Tailored Resume tab for raw output.", 
@@ -79,6 +72,7 @@ async def save_application(ctx: FunctionContext, data: SaveAppInput) -> SaveAppR
         parsed = data.agent_output
 
     table = pod.table("applications")
+    # Insert columns values into the target applications table.
     table.create({
         "company": data.company,
         "role": data.role,
